@@ -29,16 +29,23 @@ class ImageDiffer {
   }
 
   /**
+   * @param {!Array<!UploadableTestCase>} testCases
    * @param {!SnapshotSuiteJson} actualSuite
    * @param {!SnapshotSuiteJson} expectedSuite
-   * @return {!Promise<!Array<!ImageDiffJson>>}
+   * @return {!Promise<!ComparisonSuiteJson>}
    */
   async compareAllPages({
+    testCases,
     actualSuite,
     expectedSuite,
   }) {
     /** @type {!Array<!Promise<!Array<!ImageDiffJson>>>} */
-    const pagePromises = [];
+    const pageComparisonPromises = [];
+
+    const diffs = [];
+    const added = this.getAdded_({expectedSuite, actualSuite});
+    const removed = this.getRemoved_({expectedSuite, actualSuite});
+    const unchanged = [];
 
     for (const [htmlFilePath, actualPage] of Object.entries(actualSuite)) {
       // HTML file is not present in `golden.json` on `master`
@@ -47,7 +54,7 @@ class ImageDiffer {
         continue;
       }
 
-      pagePromises.push(
+      pageComparisonPromises.push(
         this.compareOnePage_({
           htmlFilePath,
           goldenPageUrl: expectedPage.publicUrl,
@@ -59,18 +66,45 @@ class ImageDiffer {
     }
 
     // Flatten the array of arrays
-    const diffResults = [].concat(...(await Promise.all(pagePromises)));
+    const pageComparisonResults = [].concat(...(await Promise.all(pageComparisonPromises)));
 
-    // Filter out images with no diffs
-    return diffResults.filter((diffResult) => Boolean(diffResult.diffImageBuffer));
+    pageComparisonResults.forEach((diffResult) => {
+      if (diffResult.diffImageBuffer) {
+        diffs.push(diffResult);
+      } else {
+        unchanged.push(diffResult);
+      }
+    });
+
+    /**
+     * @param {!ImageDiffJson} a
+     * @param {!ImageDiffJson} b
+     */
+    function compareDiffsForSorting(a, b) {
+      return a.htmlFilePath.localeCompare(b.htmlFilePath, 'en-US') ||
+        a.userAgentAlias.localeCompare(b.userAgentAlias, 'en-US');
+    }
+
+    diffs.sort(compareDiffsForSorting);
+    added.sort(compareDiffsForSorting);
+    removed.sort(compareDiffsForSorting);
+    unchanged.sort(compareDiffsForSorting);
+
+    return {
+      diffs,
+      added,
+      removed,
+      unchanged,
+      testCases,
+    };
   }
 
   /**
    * @param {string} htmlFilePath
    * @param {string} goldenPageUrl
    * @param {string} snapshotPageUrl
-   * @param {!SnapshotPageJson} actualPage
    * @param {!SnapshotPageJson} expectedPage
+   * @param {!SnapshotPageJson} actualPage
    * @return {!Promise<!Array<!ImageDiffJson>>}
    * @private
    */
@@ -162,6 +196,158 @@ class ImageDiffer {
       expectedImageBuffer,
       options
     );
+  }
+
+  /**
+   * @param {!SnapshotSuiteJson} expectedSuite
+   * @param {!SnapshotSuiteJson} actualSuite
+   * @return {!Array<!ImageDiffJson>}
+   * @private
+   */
+  getAdded_({expectedSuite, actualSuite}) {
+    const added = [];
+
+    for (const [htmlFilePath, actualPage] of Object.entries(actualSuite)) {
+      const expectedPage = expectedSuite[htmlFilePath];
+      if (expectedPage) {
+        added.push(...this.getAddedActualScreenshotsAsDiffObjects_({expectedPage, actualPage, htmlFilePath}));
+      } else {
+        added.push(...this.getAllActualScreenshotsAsDiffObjects_({actualPage, htmlFilePath}));
+      }
+    }
+
+    return added;
+  }
+
+  /**
+   * @param {!SnapshotPageJson} expectedPage
+   * @param {!SnapshotPageJson} actualPage
+   * @param {string} htmlFilePath
+   * @return {!Array<!ImageDiffJson>}
+   * @private
+   */
+  getAddedActualScreenshotsAsDiffObjects_({expectedPage, actualPage, htmlFilePath}) {
+    const added = [];
+
+    for (const [userAgentAlias, actualImageUrl] of Object.entries(actualPage.screenshots)) {
+      if (expectedPage.screenshots[userAgentAlias]) {
+        continue;
+      }
+
+      added.push({
+        htmlFilePath,
+        goldenPageUrl: null,
+        snapshotPageUrl: actualPage.publicUrl,
+        userAgentAlias,
+        actualImageUrl,
+        expectedImageUrl: null,
+        diffImageBuffer: null,
+        diffImageUrl: null,
+      });
+    }
+
+    return added;
+  }
+
+  /**
+   * @param {!SnapshotPageJson} actualPage
+   * @param {string} htmlFilePath
+   * @return {!Array<!ImageDiffJson>}
+   * @private
+   */
+  getAllActualScreenshotsAsDiffObjects_({actualPage, htmlFilePath}) {
+    const added = [];
+
+    for (const [userAgentAlias, actualImageUrl] of Object.entries(actualPage.screenshots)) {
+      added.push({
+        htmlFilePath,
+        goldenPageUrl: null,
+        snapshotPageUrl: actualPage.publicUrl,
+        userAgentAlias,
+        actualImageUrl,
+        expectedImageUrl: null,
+        diffImageBuffer: null,
+        diffImageUrl: null,
+      });
+    }
+
+    return added;
+  }
+
+  /**
+   * @param {!SnapshotSuiteJson} expectedSuite
+   * @param {!SnapshotSuiteJson} actualSuite
+   * @return {!Array<!ImageDiffJson>}
+   * @private
+   */
+  getRemoved_({expectedSuite, actualSuite}) {
+    const removed = [];
+
+    for (const [htmlFilePath, expectedPage] of Object.entries(expectedSuite)) {
+      const actualPage = actualSuite[htmlFilePath];
+      if (actualPage) {
+        removed.push(...this.getRemovedExpectedScreenshotsAsDiffObjects_({expectedPage, actualPage, htmlFilePath}));
+      } else {
+        removed.push(...this.getAllExpectedScreenshotsAsDiffObjects_({expectedPage, htmlFilePath}));
+      }
+    }
+
+    return removed;
+  }
+
+  /**
+   * @param {!SnapshotPageJson} expectedPage
+   * @param {!SnapshotPageJson} actualPage
+   * @param {string} htmlFilePath
+   * @return {!Array<!ImageDiffJson>}
+   * @private
+   */
+  getRemovedExpectedScreenshotsAsDiffObjects_({expectedPage, actualPage, htmlFilePath}) {
+    const removed = [];
+
+    for (const [userAgentAlias, expectedImageUrl] of Object.entries(expectedPage.screenshots)) {
+      if (actualPage.screenshots[userAgentAlias]) {
+        continue;
+      }
+
+      removed.push({
+        htmlFilePath,
+        goldenPageUrl: expectedPage.publicUrl,
+        snapshotPageUrl: null,
+        userAgentAlias,
+        actualImageUrl: null,
+        expectedImageUrl,
+        diffImageBuffer: null,
+        diffImageUrl: null,
+      });
+    }
+
+    return removed;
+  }
+
+  /**
+   * @param {!SnapshotPageJson} expectedPage
+   * @param {string} htmlFilePath
+   * @return {!Array<!ImageDiffJson>}
+   * @private
+   */
+  getAllExpectedScreenshotsAsDiffObjects_({expectedPage, htmlFilePath}) {
+    const removed = [];
+
+    for (const [userAgentAlias, expectedImageUrl] of Object.entries(expectedPage.screenshots)) {
+      removed.push({
+        htmlFilePath,
+        goldenPageUrl: expectedPage.publicUrl,
+        snapshotPageUrl: null,
+        userAgentAlias,
+        actualImageUrl: null,
+        expectedImageUrl,
+        diffImageBuffer: null,
+        diffImageUrl: null,
+      });
+    }
+
+    return removed;
   }
 }
 

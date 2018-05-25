@@ -49,12 +49,22 @@ class SnapshotStore {
    * Writes the data to the given `golden.json` file path.
    * @param {!Array<!UploadableTestCase>} testCases
    * @param {!Array<!ImageDiffJson>} diffs
+   * @return {!Promise<string>}
+   */
+  async getSnapshotJsonString({testCases, diffs}) {
+    const jsonData = await this.getJsonData_({testCases, diffs});
+    return stringify(jsonData, {space: '  '}) + '\n';
+  }
+
+  /**
+   * Writes the data to the given `golden.json` file path.
+   * @param {!Array<!UploadableTestCase>} testCases
+   * @param {!Array<!ImageDiffJson>} diffs
    * @return {!Promise<void>}
    */
   async writeToDisk({testCases, diffs}) {
-    const jsonData = await this.getJsonData_({testCases, diffs});
+    const jsonFileContent = await this.getSnapshotJsonString({testCases, diffs});
     const jsonFilePath = this.cliArgs_.goldenPath;
-    const jsonFileContent = stringify(jsonData, {space: '  '}) + '\n';
 
     await fs.writeFile(jsonFilePath, jsonFileContent);
 
@@ -158,11 +168,12 @@ class SnapshotStore {
     diffs.forEach((diff) => {
       const htmlFilePath = diff.htmlFilePath;
       const browserKey = diff.browserKey;
+      const newPage = newJsonData[htmlFilePath];
       if (jsonData[htmlFilePath]) {
-        jsonData[htmlFilePath].publicUrl = newJsonData[htmlFilePath].publicUrl;
-        jsonData[htmlFilePath].screenshots[browserKey] = newJsonData[htmlFilePath].screenshots[browserKey];
+        jsonData[htmlFilePath].publicUrl = newPage.publicUrl;
+        jsonData[htmlFilePath].screenshots[browserKey] = newPage.screenshots[browserKey];
       } else {
-        jsonData[htmlFilePath] = this.deepCloneJson_(newJsonData[htmlFilePath]);
+        jsonData[htmlFilePath] = this.deepCloneJson_(newPage);
       }
     });
 

@@ -19,6 +19,7 @@
 const childProcess = require('child_process');
 const fs = require('mz/fs');
 const glob = require('glob');
+const path = require('path');
 
 const CbtUserAgent = require('./cbt-user-agent');
 const CliArgParser = require('./cli-arg-parser');
@@ -94,6 +95,7 @@ class Controller {
     this.baseUploadDir_ = await this.storage_.generateUniqueUploadDir();
 
     await this.gitRepo_.fetch();
+    await CbtUserAgent.fetchBrowsersToRun();
 
     if (await this.cliArgs_.shouldBuild()) {
       childProcess.spawnSync('npm', ['run', 'screenshot:build'], {shell: true, stdio: 'inherit'});
@@ -111,11 +113,27 @@ class Controller {
      * Relative paths of all asset files (HTML, CSS, JS) that will be uploaded.
      * @type {!Array<string>}
      */
-    const assetFileRelativePaths = glob.sync('**/*', {cwd: this.cliArgs_.testDir, nodir: true});
+    const allAssetFileRelativePaths = glob.sync('**/*', {
+      cwd: this.cliArgs_.testDir,
+      nodir: true,
+    });
+
+    const ignoredFullPaths = (await this.gitRepo_.getIgnoredPaths(
+      allAssetFileRelativePaths.map((relativePath) => path.join(this.cliArgs_.testDir, relativePath))
+    )).filter((fullPath) => !fullPath.includes('/out/'));
+
+    const filteredAssetFileRelativePaths = allAssetFileRelativePaths.filter((relativePath) => {
+      return !ignoredFullPaths.includes(path.join(this.cliArgs_.testDir, relativePath));
+    });
 
     /** @type {!Array<!Promise<!UploadableFile>>} */
-    const uploadPromises = assetFileRelativePaths.map((assetFileRelativePath, assetFileIndex) => {
-      return this.uploadOneAsset_(assetFileRelativePath, testCases, assetFileIndex, assetFileRelativePaths.length);
+    const uploadPromises = filteredAssetFileRelativePaths.map((assetFileRelativePath, assetFileIndex) => {
+      return this.uploadOneAsset_(
+        assetFileRelativePath,
+        testCases,
+        assetFileIndex,
+        filteredAssetFileRelativePaths.length,
+      );
     });
 
     return Promise.all(uploadPromises)
@@ -160,7 +178,7 @@ class Controller {
    */
   async handleUploadOneAssetSuccess_(assetFile, testCases) {
     const relativePath = assetFile.destinationRelativeFilePath;
-    const isHtmlFile = relativePath.endsWith('.html');
+    const isHtmlFile = relativePath.includes('mdc-') && relativePath.endsWith('.html');
     const isIncluded =
       this.cliArgs_.includeUrlPatterns.length === 0 ||
       this.cliArgs_.includeUrlPatterns.some((pattern) => pattern.test(relativePath));
@@ -328,11 +346,12 @@ class Controller {
 
   /**
    * @param {!Array<!UploadableTestCase>} testCases
-   * @return {!Promise<{diffs: !Array<!ImageDiffJson>, testCases: !Array<!UploadableTestCase>}>}
+   * @return {!Promise<!ComparisonSuiteJson>}
    */
   async diffGoldenJson(testCases) {
     /** @type {!Array<!ImageDiffJson>} */
-    const diffs = await this.imageDiffer_.compareAllPages({
+    const {diffs, added, removed, unchanged} = await this.imageDiffer_.compareAllPages({
+      testCases,
       actualSuite: await this.snapshotStore_.fromTestCases(testCases),
       expectedSuite: await this.snapshotStore_.fromDiffBase(),
     });
@@ -340,14 +359,8 @@ class Controller {
     return Promise.all(diffs.map((diff, index) => this.uploadOneDiffImage_(diff, index, diffs.length)))
       .then(
         () => {
-          diffs.sort((a, b) => {
-            return a.htmlFilePath.localeCompare(b.htmlFilePath, 'en-US') ||
-              a.userAgentAlias.localeCompare(b.userAgentAlias, 'en-US');
-          });
           console.log('\n\nDONE diffing screenshot images!\n\n');
-          console.log(diffs);
-          console.log(`\n\nFound ${diffs.length} screenshot diffs!\n\n`);
-          return {testCases, diffs};
+          return {testCases, diffs, added, removed, unchanged};
         },
         (err) => Promise.reject(err)
       )
@@ -381,26 +394,58 @@ class Controller {
   }
 
   /**
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
+   * @param {!ComparisonSuiteJson} comparisonSuiteJson
    * @return {!Promise<string>}
    */
-  async uploadDiffReport({testCases, diffs}) {
-    const reportGenerator = new ReportGenerator({testCases, diffs});
+  async uploadDiffReport(comparisonSuiteJson) {
+    const reportGenerator = new ReportGenerator(comparisonSuiteJson);
+    const diffReportHtml = await reportGenerator.generateHtml();
+    const diffReportJsonStr = JSON.stringify(comparisonSuiteJson, null, 2);
+    const snapshotJsonStr = await this.snapshotStore_.getSnapshotJsonString(comparisonSuiteJson);
+
+    const writeFile = async ({filename, content, queueIndex, queueLength}) => {
+      const filePath = path.join(this.cliArgs_.testDir, filename);
+      console.log(`Writing ${filePath} to disk...`);
+
+      await fs.writeFile(filePath, content, {encoding: 'utf8'});
+
+      return this.storage_.uploadFile(new UploadableFile({
+        destinationParentDirectory: this.baseUploadDir_,
+        destinationRelativeFilePath: filename,
+        fileContent: content,
+        queueIndex,
+        queueLength,
+      }));
+    };
 
     /** @type {!UploadableFile} */
-    const reportFile = await this.storage_.uploadFile(new UploadableFile({
-      destinationParentDirectory: this.baseUploadDir_,
-      destinationRelativeFilePath: 'report.html',
-      fileContent: await reportGenerator.generateHtml(),
-      queueIndex: 0,
-      queueLength: 1,
-    }));
+    const [reportPageFile] = await Promise.all([
+      writeFile({
+        filename: 'report.html',
+        content: diffReportHtml,
+        queueIndex: 0,
+        queueLength: 3,
+      }),
+
+      writeFile({
+        filename: 'report.json',
+        content: diffReportJsonStr,
+        queueIndex: 1,
+        queueLength: 3,
+      }),
+
+      writeFile({
+        filename: 'snapshot.json',
+        content: snapshotJsonStr,
+        queueIndex: 2,
+        queueLength: 3,
+      }),
+    ]);
 
     console.log('\n\nDONE uploading diff report to GCS!\n\n');
-    console.log(reportFile.publicUrl);
+    console.log(reportPageFile.publicUrl);
 
-    return reportFile.publicUrl;
+    return reportPageFile.publicUrl;
   }
 
   /**
@@ -410,7 +455,7 @@ class Controller {
   logUploadAllAssetsSuccess_(testCases) {
     const publicHtmlFileUrls = testCases.map((testCase) => testCase.htmlFile.publicUrl).sort();
     console.log('\n\nDONE uploading asset files to GCS!\n\n');
-    console.log(publicHtmlFileUrls.join('\n'));
+    console.log(publicHtmlFileUrls.join('\n'), '\n\n');
   }
 
   /**
