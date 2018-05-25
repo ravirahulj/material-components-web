@@ -16,6 +16,19 @@
 
 window.mdc = window.mdc || {};
 window.mdc.report = window.mdc.report || (() => {
+  function updateApprovalCounts() {
+    const approvedBrowserCheckboxElems = Array.from(document.querySelectorAll(
+      '.report-browser__heading input[type="checkbox"]:checked:not(:indeterminate)'
+    ));
+    const approvalCount = approvedBrowserCheckboxElems.length;
+    const approvalCountElem = document.querySelector('#report-approval__total-count');
+    const approvalButtonElem = approvalCountElem.closest('button');
+    approvalCountElem.innerText = approvalCount;
+    approvalButtonElem.disabled = approvalCount === 0;
+  }
+
+  setTimeout(() => updateApprovalCounts(), 50);
+
   document.addEventListener('click', (evt) => {
     if (!evt.target.matches('input[type="checkbox"]')) {
       return;
@@ -59,17 +72,6 @@ window.mdc.report = window.mdc.report || (() => {
 
       fileCheckboxElem.checked = areSomeChecked;
       fileCheckboxElem.indeterminate = areSomeChecked && areSomeUnchecked;
-    }
-
-    function updateApprovalCounts() {
-      const approvedBrowserCheckboxElems = Array.from(document.querySelectorAll(
-        '.report-browser__heading input[type="checkbox"]:checked:not(:indeterminate)'
-      ));
-      const approvalCount = approvedBrowserCheckboxElems.length;
-      const approvalCountElem = document.querySelector('#report-approval__total-count');
-      const approvalButtonElem = approvalCountElem.closest('button');
-      approvalCountElem.innerText = approvalCount;
-      approvalButtonElem.disabled = approvalCount === 0;
     }
 
     browserElem = evt.target.closest('.report-browser');

@@ -104,7 +104,6 @@ class ReportGenerator {
     <title>${title} - Screenshot Test Report - MDC Web</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="./out/report.css">
-    <script src="./report.js"></script>
   </head>
   <body class="report-body" data-mdc-report-json-url="${reportJsonUrl}">
     <h1>
@@ -150,6 +149,7 @@ class ReportGenerator {
       showCheckboxes: false,
     })}
     ${this.getApprovalBarMarkup_()}
+    <script src="./report.js"></script>
   </body>
 </html>
 `;
