@@ -20,11 +20,21 @@ window.mdc.report = window.mdc.report || (() => {
     const approvedBrowserCheckboxElems = Array.from(document.querySelectorAll(
       '.report-browser__heading input[type="checkbox"]:checked:not(:indeterminate)'
     ));
+
     const approvalCount = approvedBrowserCheckboxElems.length;
     const approvalCountElem = document.querySelector('#report-approval__total-count');
     const approvalButtonElem = approvalCountElem.closest('button');
     approvalCountElem.innerText = approvalCount;
     approvalButtonElem.disabled = approvalCount === 0;
+
+    const retryCount = approvedBrowserCheckboxElems.filter((elem) => {
+      const type = elem.getAttribute('data-mdc-changelist-type');
+      return type === 'diff';
+    }).length;
+    const retryCountElem = document.querySelector('#report-approval__diff-count');
+    const retryButtonElem = retryCountElem.closest('button');
+    retryCountElem.innerText = retryCount;
+    retryButtonElem.disabled = retryCount === 0;
   }
 
   setTimeout(() => updateApprovalCounts(), 50);

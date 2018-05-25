@@ -173,20 +173,20 @@ class ReportGenerator {
     return `
 <details class="report-changelist" ${isOpen && numDiffs > 0 ? 'open' : ''} data-mdc-changelist-type="${type}">
   <summary class="report-changelist__heading">
-    ${this.getCheckboxMarkup_(showCheckboxes && numDiffs > 0)}
+    ${this.getCheckboxMarkup_(showCheckboxes && numDiffs > 0, type)}
     ${numDiffs} ${heading}${pluralize && numDiffs !== 1 ? 's' : ''}
   </summary>
   <div class="report-changelist__content">
-    ${this.getDiffListMarkup_({changelist, map, showCheckboxes})}
+    ${this.getDiffListMarkup_({changelist, map, showCheckboxes, type})}
   </div>
 </details>
 `;
   }
 
-  getCheckboxMarkup_(isEnabled) {
+  getCheckboxMarkup_(isEnabled, type) {
     return isEnabled
-      ? '<input type="checkbox" checked>'
-      : '<input type="checkbox" style="visibility: hidden">'
+      ? `<input type="checkbox" data-mdc-changelist-type="${type}" checked>`
+      : `<input type="checkbox" data-mdc-changelist-type="${type}" style="visibility: hidden">`
     ;
   }
 
@@ -367,17 +367,19 @@ on tag
 `;
   }
 
-  getDiffListMarkup_({changelist, map, showCheckboxes}) {
+  getDiffListMarkup_({changelist, map, showCheckboxes, type}) {
     const numDiffs = changelist.length;
     if (numDiffs === 0) {
       return '<div class="report-congrats">Woohoo! 🎉</div>';
     }
 
     const htmlFilePaths = Array.from(map.keys());
-    return htmlFilePaths.map((htmlFilePath) => this.getTestCaseMarkup_({htmlFilePath, map, showCheckboxes})).join('\n');
+    return htmlFilePaths.map((htmlFilePath) => this.getTestCaseMarkup_({
+      htmlFilePath, map, showCheckboxes, type,
+    })).join('\n');
   }
 
-  getTestCaseMarkup_({htmlFilePath, map, showCheckboxes}) {
+  getTestCaseMarkup_({htmlFilePath, map, showCheckboxes, type}) {
     const diffs = map.get(htmlFilePath);
     const goldenPageUrl = diffs[0].goldenPageUrl;
     const snapshotPageUrl = diffs[0].snapshotPageUrl;
@@ -385,24 +387,24 @@ on tag
     return `
 <details class="report-file" open>
   <summary class="report-file__heading">
-    ${this.getCheckboxMarkup_(showCheckboxes)}
+    ${this.getCheckboxMarkup_(showCheckboxes, type)}
     ${htmlFilePath}
     (<a href="${goldenPageUrl}">golden</a> | <a href="${snapshotPageUrl}">snapshot</a>)
   </summary>
   <div class="report-file__content">
-    ${diffs.map((diff) => this.getDiffRowMarkup_({diff, showCheckboxes})).join('\n')}
+    ${diffs.map((diff) => this.getDiffRowMarkup_({diff, showCheckboxes, type})).join('\n')}
   </div>
 </details>
 `;
   }
 
-  getDiffRowMarkup_({diff, showCheckboxes}) {
+  getDiffRowMarkup_({diff, showCheckboxes, type}) {
     return `
 <details class="report-browser" open
          data-mdc-html-file-path="${diff.htmlFilePath}"
          data-mdc-user-agent-alias="${diff.userAgentAlias}">
   <summary class="report-browser__heading">
-    ${this.getCheckboxMarkup_(showCheckboxes)}
+    ${this.getCheckboxMarkup_(showCheckboxes, type)}
     ${diff.userAgentAlias}
   </summary>
   <div class="report-browser__content">
@@ -447,7 +449,9 @@ on tag
     (CLI)
   </button>
   <button class="report-approval__button" ${numDiffs > 0 ? '' : 'disabled'} onclick="mdc.report.retrySelected()">
-    Retry ${numDiffs} diffs
+    Retry
+    <span id="report-approval__diff-count">${numDiffs}</span>
+    diffs
     (CLI)
   </button>
   <span class="report-approval__clipboard-notice report-approval__clipboard-notice--hidden"
