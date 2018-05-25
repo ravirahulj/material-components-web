@@ -446,7 +446,7 @@ on tag
     changes
     (CLI)
   </button>
-  <button class="report-approval__button" ${numDiffs > 0 ? '' : 'disabled'}>
+  <button class="report-approval__button" ${numDiffs > 0 ? '' : 'disabled'} onclick="mdc.report.retrySelected()">
     Retry ${numDiffs} diffs
     (CLI)
   </button>

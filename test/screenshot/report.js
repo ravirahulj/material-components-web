@@ -132,6 +132,24 @@ window.mdc.report = window.mdc.report || (() => {
     });
   }
 
+  function getRetryArgs(type) {
+    const htmlFilePathSet = new Set();
+    const userAgentAliasSet = new Set();
+
+    const browserElems = getSelectedBrowserElems(type, ':checked');
+    browserElems.forEach((browserElem) => {
+      const htmlFilePath = browserElem.getAttribute('data-mdc-html-file-path');
+      const userAgentAlias = browserElem.getAttribute('data-mdc-user-agent-alias');
+      htmlFilePathSet.add(`--mdc-include-url=${htmlFilePath}`);
+      userAgentAliasSet.add(`--mdc-include-browser=${userAgentAlias}`);
+    });
+
+    return [
+      ...Array.from(htmlFilePathSet),
+      ...Array.from(userAgentAliasSet),
+    ];
+  }
+
   function approveSelected() {
     const reportJsonUrl = document.body.getAttribute('data-mdc-report-json-url');
     const changelistArgs = [
@@ -157,9 +175,40 @@ window.mdc.report = window.mdc.report || (() => {
       // Now that we've selected the anchor text, execute the copy command
       const successful = document.execCommand('copy');
       const msg = successful ? 'successful' : 'unsuccessful';
-      console.log('Copy email command was ' + msg);
+      console.log('Copy command was ' + msg);
     } catch (err) {
-      console.log('Oops, unable to copy');
+      console.log('ERROR: Unable to copy to clipboard');
+    }
+
+    // Remove the selections - NOTE: Should use
+    // removeRange(range) when it is supported
+    window.getSelection().removeAllRanges();
+
+    const clipboardNoticeElem = document.querySelector('#report-approval__clipboard-notice');
+    clipboardNoticeElem.classList.remove('report-approval__clipboard-notice--hidden');
+    clearTimeout(approvalClipboardNoticeTimer);
+    approvalClipboardNoticeTimer = setTimeout(() => {
+      clipboardNoticeElem.classList.add('report-approval__clipboard-notice--hidden');
+    }, 4 * 1000);
+  }
+
+  function retrySelected() {
+    const retryArgs = getRetryArgs('diff');
+    const commandStr = `npm run screenshot:test -- ${retryArgs.join(' ')}`;
+
+    const clipboardElem = document.querySelector('#report-approval__clipboard-content');
+    clipboardElem.innerText = commandStr;
+    const range = document.createRange();
+    range.selectNode(clipboardElem);
+    window.getSelection().addRange(range);
+
+    try {
+      // Now that we've selected the anchor text, execute the copy command
+      const successful = document.execCommand('copy');
+      const msg = successful ? 'successful' : 'unsuccessful';
+      console.log('Copy command was ' + msg);
+    } catch (err) {
+      console.log('ERROR: Unable to copy to clipboard');
     }
 
     // Remove the selections - NOTE: Should use
@@ -177,5 +226,6 @@ window.mdc.report = window.mdc.report || (() => {
   return {
     collapseAll,
     approveSelected,
+    retrySelected,
   };
 })();
