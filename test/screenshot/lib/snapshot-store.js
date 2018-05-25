@@ -149,7 +149,7 @@ class SnapshotStore {
    * @private
    */
   async writeAllToDisk_(reportJson) {
-    const jsonData = this.getJsonData_(reportJson);
+    const jsonData = await this.getJsonData_(reportJson);
     await this.writeToDiskImpl_(jsonData);
   }
 
