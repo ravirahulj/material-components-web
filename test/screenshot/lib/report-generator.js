@@ -17,20 +17,19 @@
 const GitRepo = require('./git-repo');
 const CliArgParser = require('./cli-arg-parser');
 const childProcess = require('mz/child_process');
-const fs = require('mz/fs');
 
 const GITHUB_REPO_URL = 'https://github.com/material-components/material-components-web';
 
 class ReportGenerator {
   /**
-   * @param {!ComparisonSuiteJson} comparisonSuiteJson
+   * @param {!ReportSuiteJson} reportJson
    */
-  constructor(comparisonSuiteJson) {
+  constructor(reportJson) {
     /**
-     * @type {!ComparisonSuiteJson}
+     * @type {!ReportSuiteJson}
      * @private
      */
-    this.comparisonSuiteJson_ = comparisonSuiteJson;
+    this.reportJson_ = reportJson;
 
     /**
      * @type {!GitRepo}
@@ -77,17 +76,17 @@ class ReportGenerator {
       });
     }
 
-    populateMap(this.comparisonSuiteJson_.diffs, this.diffMap_);
-    populateMap(this.comparisonSuiteJson_.added, this.addedMap_);
-    populateMap(this.comparisonSuiteJson_.removed, this.removedMap_);
-    populateMap(this.comparisonSuiteJson_.unchanged, this.unchangedMap_);
+    populateMap(this.reportJson_.diffs, this.diffMap_);
+    populateMap(this.reportJson_.added, this.addedMap_);
+    populateMap(this.reportJson_.removed, this.removedMap_);
+    populateMap(this.reportJson_.unchanged, this.unchangedMap_);
   }
 
-  async generateHtml() {
-    const numDiffs = this.comparisonSuiteJson_.diffs.length;
-    const numAdded = this.comparisonSuiteJson_.added.length;
-    const numRemoved = this.comparisonSuiteJson_.removed.length;
-    const numUnchanged = this.comparisonSuiteJson_.unchanged.length;
+  async generateHtml({reportJsonUrl}) {
+    const numDiffs = this.reportJson_.diffs.length;
+    const numAdded = this.reportJson_.added.length;
+    const numRemoved = this.reportJson_.removed.length;
+    const numUnchanged = this.reportJson_.unchanged.length;
 
     const title = [
       `${numDiffs} Diff${numDiffs !== 1 ? 's' : ''}`,
@@ -107,7 +106,7 @@ class ReportGenerator {
     <link rel="stylesheet" href="./out/report.css">
     <script src="./report.js"></script>
   </head>
-  <body class="report-body">
+  <body class="report-body" data-mdc-report-json-url="${reportJsonUrl}">
     <h1>
       Screenshot Test Report for
       <a href="https://github.com/material-components/material-components-web" target="_blank">MDC Web</a>
@@ -115,33 +114,42 @@ class ReportGenerator {
     ${this.getCollapseButtonMarkup_()}
     ${await this.getMetadataMarkup_()}
     ${await this.getChangelistMarkup_({
-      changelist: this.comparisonSuiteJson_.diffs,
+      changelist: this.reportJson_.diffs,
       map: this.diffMap_,
       isOpen: true,
       heading: 'Diff',
+      type: 'diff',
       pluralize: true,
+      showCheckboxes: true,
     })}
     ${await this.getChangelistMarkup_({
-      changelist: this.comparisonSuiteJson_.added,
+      changelist: this.reportJson_.added,
       map: this.addedMap_,
       isOpen: true,
       heading: 'Added',
+      type: 'added',
       pluralize: false,
+      showCheckboxes: true,
     })}
     ${await this.getChangelistMarkup_({
-      changelist: this.comparisonSuiteJson_.removed,
+      changelist: this.reportJson_.removed,
       map: this.removedMap_,
       isOpen: true,
       heading: 'Removed',
+      type: 'removed',
       pluralize: false,
+      showCheckboxes: true,
     })}
     ${await this.getChangelistMarkup_({
-      changelist: this.comparisonSuiteJson_.unchanged,
+      changelist: this.reportJson_.unchanged,
       map: this.unchangedMap_,
       isOpen: false,
       heading: 'Unchanged',
+      type: 'unchanged',
       pluralize: false,
+      showCheckboxes: false,
     })}
+    ${this.getApprovalBarMarkup_()}
   </body>
 </html>
 `;
@@ -153,27 +161,39 @@ class ReportGenerator {
    * @param {!Map<string, !Array<!ImageDiffJson>>} map
    * @param {boolean} isOpen
    * @param {string} heading
+   * @param {string} type
    * @param {boolean} pluralize
+   * @param {boolean} showCheckboxes
    * @return {Promise<string>}
    * @private
    */
-  async getChangelistMarkup_({changelist, map, isOpen, heading, pluralize}) {
+  async getChangelistMarkup_({changelist, map, isOpen, heading, type, pluralize, showCheckboxes}) {
     const numDiffs = changelist.length;
 
     return `
-<details class="report-changelist" ${isOpen && numDiffs > 0 ? 'open' : ''}>
-  <summary class="report-changelist__heading">${numDiffs} ${heading}${pluralize && numDiffs !== 1 ? 's' : ''}</summary>
+<details class="report-changelist" ${isOpen && numDiffs > 0 ? 'open' : ''} data-mdc-changelist-type="${type}">
+  <summary class="report-changelist__heading">
+    ${this.getCheckboxMarkup_(showCheckboxes && numDiffs > 0)}
+    ${numDiffs} ${heading}${pluralize && numDiffs !== 1 ? 's' : ''}
+  </summary>
   <div class="report-changelist__content">
-    ${this.getDiffListMarkup_({changelist, map})}
+    ${this.getDiffListMarkup_({changelist, map, showCheckboxes})}
   </div>
 </details>
 `;
   }
 
+  getCheckboxMarkup_(isEnabled) {
+    return isEnabled
+      ? '<input type="checkbox" checked>'
+      : '<input type="checkbox" style="visibility: hidden">'
+    ;
+  }
+
   async getMetadataMarkup_() {
     const timestamp = (new Date()).toISOString();
-    const numTestCases = this.comparisonSuiteJson_.testCases.length;
-    const numScreenshots = this.comparisonSuiteJson_.testCases
+    const numTestCases = this.reportJson_.testCases.length;
+    const numScreenshots = this.reportJson_.testCases
       .map((testCase) => testCase.screenshotImageFiles.length)
       .reduce((total, current) => total + current, 0)
     ;
@@ -347,17 +367,17 @@ on tag
 `;
   }
 
-  getDiffListMarkup_({changelist, map}) {
+  getDiffListMarkup_({changelist, map, showCheckboxes}) {
     const numDiffs = changelist.length;
     if (numDiffs === 0) {
       return '<div class="report-congrats">Woohoo! 🎉</div>';
     }
 
     const htmlFilePaths = Array.from(map.keys());
-    return htmlFilePaths.map((htmlFilePath) => this.getTestCaseMarkup_({htmlFilePath, map})).join('\n');
+    return htmlFilePaths.map((htmlFilePath) => this.getTestCaseMarkup_({htmlFilePath, map, showCheckboxes})).join('\n');
   }
 
-  getTestCaseMarkup_({htmlFilePath, map}) {
+  getTestCaseMarkup_({htmlFilePath, map, showCheckboxes}) {
     const diffs = map.get(htmlFilePath);
     const goldenPageUrl = diffs[0].goldenPageUrl;
     const snapshotPageUrl = diffs[0].snapshotPageUrl;
@@ -365,20 +385,26 @@ on tag
     return `
 <details class="report-file" open>
   <summary class="report-file__heading">
+    ${this.getCheckboxMarkup_(showCheckboxes)}
     ${htmlFilePath}
     (<a href="${goldenPageUrl}">golden</a> | <a href="${snapshotPageUrl}">snapshot</a>)
   </summary>
   <div class="report-file__content">
-    ${diffs.map((diff) => this.getDiffRowMarkup_(diff)).join('\n')}
+    ${diffs.map((diff) => this.getDiffRowMarkup_({diff, showCheckboxes})).join('\n')}
   </div>
 </details>
 `;
   }
 
-  getDiffRowMarkup_(diff) {
+  getDiffRowMarkup_({diff, showCheckboxes}) {
     return `
-<details class="report-browser" open>
-  <summary class="report-browser__heading">${diff.userAgentAlias}</summary>
+<details class="report-browser" open
+         data-mdc-html-file-path="${diff.htmlFilePath}"
+         data-mdc-user-agent-alias="${diff.userAgentAlias}">
+  <summary class="report-browser__heading">
+    ${this.getCheckboxMarkup_(showCheckboxes)}
+    ${diff.userAgentAlias}
+  </summary>
   <div class="report-browser__content">
     ${this.getDiffCellMarkup_('Golden', diff.expectedImageUrl)}
     ${this.getDiffCellMarkup_('Diff', diff.diffImageUrl)}
@@ -407,6 +433,31 @@ on tag
     }
 
     return '<div>(null)</div>';
+  }
+
+  getApprovalBarMarkup_() {
+    const numChanges = this.reportJson_.testCases.length;
+    const numDiffs = this.reportJson_.diffs.length;
+    return `
+<footer class="report-approval">
+  <button class="report-approval__button" onclick="mdc.report.approveSelected()">
+    Approve
+    <span id="report-approval__total-count">${numChanges}</span>
+    changes
+    (CLI)
+  </button>
+  <button class="report-approval__button" ${numDiffs > 0 ? '' : 'disabled'}>
+    Retry ${numDiffs} diffs
+    (CLI)
+  </button>
+  <span class="report-approval__clipboard-notice report-approval__clipboard-notice--hidden"
+        id="report-approval__clipboard-notice">
+    Copied CLI command to clipboard!
+  </span>
+  <span class="report-approval__clipboard-content"
+        id="report-approval__clipboard-content"></span>
+</footer>    
+`;
   }
 }
 

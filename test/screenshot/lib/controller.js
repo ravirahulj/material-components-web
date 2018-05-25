@@ -333,20 +333,8 @@ class Controller {
   }
 
   /**
-   * Writes the given `testCases` to a `golden.json` file.
-   * If the file already exists, it will be overwritten.
    * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
-   * @return {!Promise<{diffs: !Array<!ImageDiffJson>, testCases: !Array<!UploadableTestCase>}>}
-   */
-  async updateGoldenJson({testCases, diffs}) {
-    await this.snapshotStore_.writeToDisk({testCases, diffs});
-    return {testCases, diffs};
-  }
-
-  /**
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @return {!Promise<!ComparisonSuiteJson>}
+   * @return {!Promise<!ReportSuiteJson>}
    */
   async diffGoldenJson(testCases) {
     /** @type {!Array<!ImageDiffJson>} */
@@ -394,14 +382,13 @@ class Controller {
   }
 
   /**
-   * @param {!ComparisonSuiteJson} comparisonSuiteJson
+   * @param {!ReportSuiteJson} reportJson
    * @return {!Promise<string>}
    */
-  async uploadDiffReport(comparisonSuiteJson) {
-    const reportGenerator = new ReportGenerator(comparisonSuiteJson);
-    const diffReportHtml = await reportGenerator.generateHtml();
-    const diffReportJsonStr = JSON.stringify(comparisonSuiteJson, null, 2);
-    const snapshotJsonStr = await this.snapshotStore_.getSnapshotJsonString(comparisonSuiteJson);
+  async uploadDiffReport(reportJson) {
+    const reportGenerator = new ReportGenerator(reportJson);
+    const diffReportJsonStr = JSON.stringify(reportJson, null, 2);
+    const snapshotJsonStr = await this.snapshotStore_.getSnapshotJsonString(reportJson);
 
     const writeFile = async ({filename, content, queueIndex, queueLength}) => {
       const filePath = path.join(this.cliArgs_.testDir, filename);
@@ -418,34 +405,42 @@ class Controller {
       }));
     };
 
-    /** @type {!UploadableFile} */
-    const [reportPageFile] = await Promise.all([
-      writeFile({
-        filename: 'report.html',
-        content: diffReportHtml,
-        queueIndex: 0,
-        queueLength: 3,
-      }),
-
+    const [reportJsonFile, snapshotJsonFile] = await Promise.all([
       writeFile({
         filename: 'report.json',
         content: diffReportJsonStr,
-        queueIndex: 1,
+        queueIndex: 0,
         queueLength: 3,
       }),
-
       writeFile({
         filename: 'snapshot.json',
         content: snapshotJsonStr,
-        queueIndex: 2,
+        queueIndex: 1,
         queueLength: 3,
       }),
     ]);
+
+    const diffReportHtml = await reportGenerator.generateHtml({
+      reportJsonUrl: reportJsonFile.publicUrl,
+      snapshotJsonUrl: snapshotJsonFile.publicUrl,
+    });
+
+    /** @type {!UploadableFile} */
+    const reportPageFile = await writeFile({
+      filename: 'report.html',
+      content: diffReportHtml,
+      queueIndex: 2,
+      queueLength: 3,
+    });
 
     console.log('\n\nDONE uploading diff report to GCS!\n\n');
     console.log(reportPageFile.publicUrl);
 
     return reportPageFile.publicUrl;
+  }
+
+  async approveChanges() {
+    return this.snapshotStore_.approveChanges();
   }
 
   /**

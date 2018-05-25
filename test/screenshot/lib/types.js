@@ -84,9 +84,10 @@ let ImageDiffJson;
  *   removed: !Array<!ImageDiffJson>,
  *   unchanged: !Array<!ImageDiffJson>,
  *   testCases: !Array<!UploadableTestCase>,
+ *   snapshotJsonUrl: ?string,
  * }}
  */
-let ComparisonSuiteJson;
+let ReportSuiteJson;
 
 
 /*

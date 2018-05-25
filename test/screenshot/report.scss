@@ -54,6 +54,8 @@ th {
 .report-changelist__heading,
 .report-file__heading,
 .report-browser__heading {
+  display: flex;
+  align-items: center;
   padding: 8px 10px;
   font-weight: bold;
   cursor: pointer;
@@ -156,4 +158,44 @@ th {
 .report-congrats {
   color: green;
   font-size: 3rem;
+}
+
+/*
+ * Approval
+ */
+
+.report-approval {
+  display: flex;
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  align-items: center;
+  padding: 24px;
+  background-color: green;
+  color: white;
+}
+
+.report-approval__button {
+  margin-right: 10px;
+}
+
+.report-approval__clipboard-notice {
+  margin-left: 10px;
+  transition: opacity .1s ease-out;
+}
+
+.report-approval__clipboard-notice--hidden {
+  transition: opacity .4s ease-in;
+  opacity: 0;
+}
+
+.report-approval__clipboard-content {
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  font-size: 1px;
+  color: transparent;
+  pointer-events: none;
+  overflow: hidden;
 }

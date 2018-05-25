@@ -47,24 +47,117 @@ class SnapshotStore {
 
   /**
    * Writes the data to the given `golden.json` file path.
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
+   * @param {!ReportSuiteJson} reportJson
    * @return {!Promise<string>}
    */
-  async getSnapshotJsonString({testCases, diffs}) {
-    const jsonData = await this.getJsonData_({testCases, diffs});
+  async getSnapshotJsonString(reportJson) {
+    const jsonData = await this.getJsonData_(reportJson);
+    return this.stringify_(jsonData);
+  }
+
+  stringify_(jsonData) {
     return stringify(jsonData, {space: '  '}) + '\n';
   }
 
   /**
-   * Writes the data to the given `golden.json` file path.
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
    * @return {!Promise<void>}
    */
-  async writeToDisk({testCases, diffs}) {
-    const jsonFileContent = await this.getSnapshotJsonString({testCases, diffs});
+  async approveChanges() {
+    /** @type {!ReportSuiteJson} */
+    const reportJson = await request({
+      uri: this.cliArgs_.reportJsonUrl,
+      json: true,
+    });
+
+    if (this.cliArgs_.hasAnyApprovalFilters()) {
+      return this.writeFilteredToDisk_(reportJson);
+    } else {
+      return this.writeAllToDisk_(reportJson);
+    }
+  }
+
+  /**
+   * @param {!ReportSuiteJson} reportJson
+   * @return {!Promise<void>}
+   * @private
+   */
+  async writeFilteredToDisk_(reportJson) {
+    reportJson = this.deepCloneJson_(reportJson);
+
+    console.log('reportJson:', reportJson);
+
+    const diffFilters = this.cliArgs_.approvedDiffs;
+    reportJson.diffs = reportJson.diffs.filter((diff) => {
+      return diffFilters.find((filter) => {
+        return filter.htmlFilePath === diff.htmlFilePath &&
+          filter.userAgentAlias === diff.userAgentAlias;
+      });
+    });
+
+    const addedFilters = this.cliArgs_.approvedAdds;
+    reportJson.added = reportJson.added.filter((added) => {
+      return addedFilters.find((filter) => {
+        return filter.htmlFilePath === added.htmlFilePath &&
+          filter.userAgentAlias === added.userAgentAlias;
+      });
+    });
+
+    const removedFilters = this.cliArgs_.approvedRemoves;
+    reportJson.removed = reportJson.removed.filter((removed) => {
+      return removedFilters.find((filter) => {
+        return filter.htmlFilePath === removed.htmlFilePath &&
+          filter.userAgentAlias === removed.userAgentAlias;
+      });
+    });
+
+    const oldJsonData = await this.fromDiffBase();
+    const newJsonData = this.deepCloneJson_(oldJsonData);
+
+    reportJson.diffs.forEach((diff) => {
+      const htmlFilePath = diff.htmlFilePath;
+      const userAgentAlias = diff.userAgentAlias;
+      const snapshotPageUrl = diff.snapshotPageUrl;
+      newJsonData[htmlFilePath].screenshots[userAgentAlias] = snapshotPageUrl;
+    });
+
+    reportJson.added.forEach((added) => {
+      const htmlFilePath = added.htmlFilePath;
+      const userAgentAlias = added.userAgentAlias;
+      const snapshotPageUrl = added.snapshotPageUrl;
+      newJsonData[htmlFilePath] = newJsonData[htmlFilePath] || {
+        publicUrl: snapshotPageUrl,
+        screenshots: {},
+      };
+      newJsonData[htmlFilePath].screenshots[userAgentAlias] = snapshotPageUrl;
+    });
+
+    reportJson.removed.forEach((removed) => {
+      const htmlFilePath = removed.htmlFilePath;
+      const userAgentAlias = removed.userAgentAlias;
+      delete newJsonData[htmlFilePath].screenshots[userAgentAlias];
+      if (newJsonData[htmlFilePath].screenshots.length === 0) {
+        delete newJsonData[htmlFilePath];
+      }
+    });
+
+    return this.writeToDiskImpl_(newJsonData);
+  }
+
+  /**
+   * @param {!ReportSuiteJson} reportJson
+   * @return {!Promise<void>}
+   * @private
+   */
+  async writeAllToDisk_(reportJson) {
+    const jsonData = this.getJsonData_(reportJson);
+    await this.writeToDiskImpl_(jsonData);
+  }
+
+  async writeToDiskImpl_(jsonData) {
+    const jsonFileContent = this.stringify_(jsonData);
     const jsonFilePath = this.cliArgs_.goldenPath;
+
+    console.log('jsonData:', jsonData);
 
     await fs.writeFile(jsonFilePath, jsonFileContent);
 
@@ -143,24 +236,23 @@ class SnapshotStore {
   }
 
   /**
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
+   * @param {!ReportSuiteJson} reportJson
    * @return {!Promise<!SnapshotSuiteJson>}
    * @private
    */
-  async getJsonData_({testCases, diffs}) {
+  async getJsonData_(reportJson) {
     return this.cliArgs_.hasAnyFilters()
-      ? await this.updateFilteredScreenshots_({testCases, diffs})
-      : await this.updateAllScreenshots_({testCases, diffs});
+      ? await this.updateFilteredScreenshots_(reportJson)
+      : await this.updateAllScreenshots_(reportJson);
   }
 
   /**
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
+   * @param {!ReportSuiteJson} reportJson
    * @return {!Promise<!SnapshotSuiteJson>}
    * @private
    */
-  async updateFilteredScreenshots_({testCases, diffs}) {
+  async updateFilteredScreenshots_(reportJson) {
+    const {testCases, diffs} = reportJson;
     const oldJsonData = await this.fromDiffBase();
     const newJsonData = await this.fromTestCases(testCases);
     const jsonData = this.deepCloneJson_(oldJsonData);
@@ -181,12 +273,12 @@ class SnapshotStore {
   }
 
   /**
-   * @param {!Array<!UploadableTestCase>} testCases
-   * @param {!Array<!ImageDiffJson>} diffs
+   * @param {!ReportSuiteJson} reportJson
    * @return {!Promise<!SnapshotSuiteJson>}
    * @private
    */
-  async updateAllScreenshots_({testCases, diffs}) {
+  async updateAllScreenshots_(reportJson) {
+    const {testCases, diffs} = reportJson;
     const oldJsonData = await this.fromDiffBase();
     const newJsonData = await this.fromTestCases(testCases);
 
@@ -228,8 +320,9 @@ class SnapshotStore {
    * In Java parlance:
    *   clone.equals(source) // true
    *   clone == source      // false
-   * @param {!Object} source JSON object to clone
-   * @return {!Object} Deep clone of `source` object
+   * @param {!T} source JSON object to clone
+   * @return {!T} Deep clone of `source` object
+   * @template T
    * @private
    */
   deepCloneJson_(source) {

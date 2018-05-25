@@ -20,16 +20,7 @@ const Controller = require('./lib/controller');
 const controller = new Controller();
 
 controller.initialize()
-  .then(() => controller.uploadAllAssets(), handleError)
-  .then((testCases) => controller.captureAllPages(testCases), handleError)
-  .then((testCases) => controller.diffGoldenJson(testCases), handleError)
-  .then(
-    async (comparisonSuiteJson) => {
-      await controller.uploadDiffReport(comparisonSuiteJson);
-      await controller.updateGoldenJson(comparisonSuiteJson);
-    },
-    handleError
-  )
+  .then(() => controller.approveChanges(), handleError)
 ;
 
 function handleError(err) {

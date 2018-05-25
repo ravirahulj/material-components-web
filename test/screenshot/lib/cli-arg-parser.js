@@ -137,6 +137,49 @@ The default behavior is to always build assets before running the tests.
       }
     );
 
+    this.parser_.addArgument(
+      ['--mdc-report-json-url'],
+      {
+        help: `
+...
+`
+          .trim(),
+      }
+    );
+
+    this.parser_.addArgument(
+      ['--mdc-approve-diff'],
+      {
+        action: 'append', // Argument may be passed multiple times. Transformed into an array of strings.
+        help: `
+...
+`
+          .trim(),
+      }
+    );
+
+    this.parser_.addArgument(
+      ['--mdc-approve-add'],
+      {
+        action: 'append', // Argument may be passed multiple times. Transformed into an array of strings.
+        help: `
+...
+`
+          .trim(),
+      }
+    );
+
+    this.parser_.addArgument(
+      ['--mdc-approve-remove'],
+      {
+        action: 'append', // Argument may be passed multiple times. Transformed into an array of strings.
+        help: `
+...
+`
+          .trim(),
+      }
+    );
+
     this.args_ = this.parser_.parseArgs();
   }
 
@@ -180,6 +223,35 @@ The default behavior is to always build assets before running the tests.
     return this.args_['mdc_skip_build'];
   }
 
+  /** @return {string} */
+  get reportJsonUrl() {
+    return this.args_['mdc_report_json_url'];
+  }
+
+  /** @return {!Array<{htmlFilePath: string, userAgentAlias: string}>} */
+  get approvedDiffs() {
+    return (this.args_['mdc_approve_diff'] || []).map((value) => {
+      const [htmlFilePath, userAgentAlias] = value.split(':');
+      return {htmlFilePath, userAgentAlias};
+    });
+  }
+
+  /** @return {!Array<{htmlFilePath: string, userAgentAlias: string}>} */
+  get approvedAdds() {
+    return (this.args_['mdc_approve_add'] || []).map((value) => {
+      const [htmlFilePath, userAgentAlias] = value.split(':');
+      return {htmlFilePath, userAgentAlias};
+    });
+  }
+
+  /** @return {!Array<{htmlFilePath: string, userAgentAlias: string}>} */
+  get approvedRemoves() {
+    return (this.args_['mdc_approve_remove'] || []).map((value) => {
+      const [htmlFilePath, userAgentAlias] = value.split(':');
+      return {htmlFilePath, userAgentAlias};
+    });
+  }
+
   /**
    * @return {boolean}
    */
@@ -189,6 +261,17 @@ The default behavior is to always build assets before running the tests.
       this.excludeUrlPatterns.length > 0 ||
       this.includeBrowserPatterns.length > 0 ||
       this.excludeBrowserPatterns.length > 0
+    );
+  }
+
+  /**
+   * @return {boolean}
+   */
+  hasAnyApprovalFilters() {
+    return (
+      this.approvedDiffs.length > 0 ||
+      this.approvedAdds.length > 0 ||
+      this.approvedRemoves.length > 0
     );
   }
 
